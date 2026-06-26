@@ -1,0 +1,8 @@
+{
+  "kernels": {
+    "default": {
+      "display_name": "Python (Default)",
+      "description": "Default kernel with common packages"
+    }
+  }
+}
