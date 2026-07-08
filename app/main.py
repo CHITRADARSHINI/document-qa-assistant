@@ -179,8 +179,7 @@ st.markdown("""
 for key, default in {
     "qa_chain": None,
     "chat_history": [],
-    "doc_history": [],
-    "active_chat_idx": None,
+    "active_chat_id": None,
     "screen": "upload",
     "add_doc_key": 0,
 }.items():
@@ -217,10 +216,19 @@ def build_combined_chain(files_data):
     )
     return chain, vectorstore
 
-def switch_to_chat(idx):
-    chat = st.session_state.doc_history[idx]
-    st.session_state.active_chat_idx = idx
-    st.session_state.qa_chain = chat["chain"]
+def switch_to_chat(chat_id):
+    chat = db.get_chat(chat_id)
+    embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+    vectorstore = FAISS.load_local(
+        db.store_path(chat_id), embeddings,
+        allow_dangerous_deserialization=True
+    )
+    retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
+    llm = ChatGroq(model_name="llama-3.1-8b-instant", api_key=os.getenv("GROQ_API_KEY"))
+    chain = RetrievalQA.from_chain_type(llm=llm, retriever=retriever, return_source_documents=True)
+
+    st.session_state.active_chat_id = chat_id
+    st.session_state.qa_chain = chain
     st.session_state.chat_history = chat["history"]
     st.session_state.screen = "chat"
 
@@ -240,22 +248,19 @@ with st.sidebar:
         st.session_state.screen = "upload"
         st.rerun()
 
-    if st.session_state.doc_history:
+    all_chats = db.list_chats()
+    if all_chats:
         st.markdown("""
         <p style='font-size:11px;color:#484f58;text-transform:uppercase;
                   letter-spacing:0.8px;padding:16px 2px 6px 2px;margin:0'>
             Chats
         </p>""", unsafe_allow_html=True)
-        for i, chat in enumerate(st.session_state.doc_history):
-            is_active = i == st.session_state.active_chat_idx
+        for chat in all_chats:
+            is_active = chat["id"] == st.session_state.active_chat_id
             names = " + ".join([display_name(n) for n in chat["docs"]])
             icon = "📖" if is_active else "📄"
-            if st.button(
-                f"{icon}  {truncate(names)}",
-                key=f"chat_{i}",
-                use_container_width=True
-            ):
-                switch_to_chat(i)
+            if st.button(f"{icon}  {truncate(names)}", key=f"chat_{chat['id']}", use_container_width=True):
+                switch_to_chat(chat["id"])
                 st.rerun()
 
 # ══════════════════════════════════════════════════════════
@@ -289,14 +294,9 @@ if st.session_state.screen == "upload":
             doc_names = [f[0] for f in files_data]
             with st.spinner("Building your chat..."):
                 chain, vectorstore = build_combined_chain(files_data)
-            st.session_state.doc_history.append({
-                "name": doc_names[0],
-                "docs": doc_names,
-                "chain": chain,
-                "vectorstore": vectorstore,
-                "history": []
-            })
-            switch_to_chat(len(st.session_state.doc_history) - 1)
+                chat_id = db.create_chat(doc_names)
+                vectorstore.save_local(db.store_path(chat_id))
+            switch_to_chat(chat_id)
             st.rerun()
 
         if st.session_state.doc_history:
@@ -342,12 +342,12 @@ if st.session_state.screen == "upload":
 # SCREEN 2 — Chat
 # ══════════════════════════════════════════════════════════
 elif st.session_state.screen == "chat":
-    idx = st.session_state.active_chat_idx
-    if idx is None:
+    chat_id = st.session_state.active_chat_id
+    if chat_id is None:
         st.session_state.screen = "upload"
         st.rerun()
 
-    chat = st.session_state.doc_history[idx]
+    chat = db.get_chat(chat_id)
     doc_labels = " + ".join([display_name(n) for n in chat["docs"]])
 
     st.markdown(
@@ -468,6 +468,10 @@ elif st.session_state.screen == "chat":
         if new_files:
             with st.spinner("Adding documents..."):
                 embeddings = HuggingFaceEmbeddings(model_name="all-MiniLM-L6-v2")
+                vectorstore = FAISS.load_local(
+                    db.store_path(chat_id), embeddings,
+                    allow_dangerous_deserialization=True
+                )
                 for fname, fdata in new_files:
                     with tempfile.NamedTemporaryFile(
                         delete=False, suffix=".pdf"
@@ -480,11 +484,13 @@ elif st.session_state.screen == "chat":
                         chunk_size=500, chunk_overlap=50
                     )
                     chunks = splitter.split_documents(docs)
-                    chat["vectorstore"].add_documents(chunks)
+                    vectorstore.add_documents(chunks)
                     chat["docs"].append(fname)
-                retriever = chat["vectorstore"].as_retriever(
-                    search_kwargs={"k": 3}
-                )
+
+                vectorstore.save_local(db.store_path(chat_id))
+                db.update_chat(chat_id, docs=chat["docs"])
+
+                retriever = vectorstore.as_retriever(search_kwargs={"k": 3})
                 llm = ChatGroq(
                     model_name="llama-3.1-8b-instant",
                     api_key=os.getenv("GROQ_API_KEY")
@@ -493,7 +499,6 @@ elif st.session_state.screen == "chat":
                     llm=llm, retriever=retriever,
                     return_source_documents=True
                 )
-                chat["chain"] = new_chain
                 st.session_state.qa_chain = new_chain
             st.session_state.add_doc_key += 1
             st.rerun()
@@ -517,7 +522,7 @@ elif st.session_state.screen == "chat":
                     st.caption(f"**{i+1}.** {src[:300]}")
 
         st.session_state.chat_history.extend([
-            {"role": "user", "content": question},
-            {"role": "assistant", "content": answer, "sources": sources}
-        ])
-        chat["history"] = st.session_state.chat_history
+        {"role": "user", "content": question},
+        {"role": "assistant", "content": answer, "sources": sources}
+    ])
+    db.update_chat(st.session_state.active_chat_id, history=st.session_state.chat_history)

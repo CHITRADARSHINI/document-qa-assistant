@@ -3,8 +3,8 @@ import json
 import uuid
 from pathlib import Path
 
-DB_PATH = Path(__file__).parent / "chats.db"
-STORE_DIR = Path(__file__).parent / "stores"
+DB_PATH = Path("/tmp/chats.db")
+STORE_DIR = Path("/tmp/stores")
 STORE_DIR.mkdir(exist_ok=True)
 
 def get_conn():
