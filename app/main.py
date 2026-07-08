@@ -13,7 +13,7 @@ from langchain_community.embeddings import HuggingFaceEmbeddings
 from langchain_community.vectorstores import FAISS
 from langchain_groq import ChatGroq
 from langchain.chains import RetrievalQA
-
+import db
 load_dotenv(Path(__file__).parent.parent / ".env")
 
 st.set_page_config(page_title="DocChat", page_icon="📄", layout="wide")

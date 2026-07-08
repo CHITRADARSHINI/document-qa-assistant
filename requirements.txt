@@ -8,3 +8,5 @@ pypdf==4.2.0
 faiss-cpu>=1.8.0
 sentence-transformers==2.7.0
 huggingface-hub==0.23.4
+pillow>=10.4.0
+huggingface-hub>=0.23.4

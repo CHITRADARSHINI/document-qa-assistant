@@ -7,3 +7,5 @@ data/faiss_index/
 data/*.pdf
 .DS_Store
 notebooks/.ipynb_checkpoints/
+chats.db
+stores/
