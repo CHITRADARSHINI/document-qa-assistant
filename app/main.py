@@ -299,7 +299,7 @@ if st.session_state.screen == "upload":
             switch_to_chat(chat_id)
             st.rerun()
 
-        if st.session_state.doc_history:
+        if st.session_state.active_chat_id:
             st.markdown("<br>", unsafe_allow_html=True)
             if st.button("← Back to chat", use_container_width=True):
                 st.session_state.screen = "chat"
